@@ -9,26 +9,22 @@ import express from "express";
 import basicAuth from "express-basic-auth";
 import mime from "mime";
 import fetch from "node-fetch";
-// import { setupMasqr } from "./Masqr.js";
 import config from "./config.js";
 
-console.log(chalk.yellow("Starting npm node.js server using file </index.js\>"));
+import { server as wisp } from "@mercuryworkshop/wisp-js/server";
+
+console.log(chalk.yellow("Starting Node.js server with Wisp at /wisp/"));
 
 const __dirname = process.cwd();
-const server = http.createServer();
 const app = express();
 const bareServer = createBareServer("/fq/");
 const PORT = process.env.PORT || 6969;
 const cache = new Map();
-const CACHE_TTL = 30 * 24 * 60 * 60 * 1000; // Cache for 30 Days
+const CACHE_TTL = 30 * 24 * 60 * 60 * 1000;
 
 if (config.challenge !== false) {
-  console.log(
-    chalk.green("🔒 Password protection is enabled! Listing logins below")
-  );
-  // biome-ignore lint/complexity/noForEach:
-  Object.entries(config.users).forEach(([username, password]) => {
-    console.log(chalk.blue(`Username: ${username}, Password: ${password}`));
+  Object.entries(config.users).forEach(([u, p]) => {
+    console.log(chalk.blue(`Username: ${u}, Password: ${p}`));
   });
   app.use(basicAuth({ users: config.users, challenge: true }));
 }
@@ -36,13 +32,12 @@ if (config.challenge !== false) {
 app.get("/e/*", async (req, res, next) => {
   try {
     if (cache.has(req.path)) {
-      const { data, contentType, timestamp } = cache.get(req.path);
-      if (Date.now() - timestamp > CACHE_TTL) {
-        cache.delete(req.path);
-      } else {
+    const { data, contentType, timestamp } = cache.get(req.path);
+      if (Date.now() - timestamp <= CACHE_TTL) {
         res.writeHead(200, { "Content-Type": contentType });
         return res.end(data);
       }
+      cache.delete(req.path);
     }
 
     const baseUrls = {
@@ -51,7 +46,7 @@ app.get("/e/*", async (req, res, next) => {
       "/e/3/": "https://raw.githubusercontent.com/3v1/V5-Retro/master/",
     };
 
-    let reqTarget;
+    let reqTarget = null;
     for (const [prefix, baseUrl] of Object.entries(baseUrls)) {
       if (req.path.startsWith(prefix)) {
         reqTarget = baseUrl + req.path.slice(prefix.length);
@@ -59,27 +54,21 @@ app.get("/e/*", async (req, res, next) => {
       }
     }
 
-    if (!reqTarget) {
-      return next();
-    }
+    if (!reqTarget) return next();
 
     const asset = await fetch(reqTarget);
-    if (!asset.ok) {
-      return next();
-    }
+    if (!asset.ok) return next();
 
-    const data = Buffer.from(await asset.arrayBuffer());
+    const buf = Buffer.from(await asset.arrayBuffer());
     const ext = path.extname(reqTarget);
     const no = [".unityweb"];
-    const contentType = no.includes(ext)
-      ? "application/octet-stream"
-      : mime.getType(ext);
+    const contentType = no.includes(ext) ? "application/octet-stream" : mime.getType(ext);
 
-    cache.set(req.path, { data, contentType, timestamp: Date.now() });
+    cache.set(req.path, { data: buf, contentType, timestamp: Date.now() });
     res.writeHead(200, { "Content-Type": contentType });
-    res.end(data);
-  } catch (error) {
-    console.error("Error fetching asset:", error);
+    res.end(buf);
+  } catch (err) {
+    console.error("Error fetching asset:", err);
     res.setHeader("Content-Type", "text/html");
     res.status(500).send("Error fetching the asset");
   }
@@ -88,46 +77,24 @@ app.get("/e/*", async (req, res, next) => {
 app.use(cookieParser());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-
-/* if (process.env.MASQR === "true") {
-  console.log(chalk.green("Masqr is enabled"));
-  setupMasqr(app);
-} */
-
 app.use(express.static(path.join(__dirname, "mango")));
 app.use("/fq", cors({ origin: true }));
 
-const routes = [
-  { path: "/about", file: "about.html" },
-  { path: "/apps", file: "apps.html" },
-  { path: "/games", file: "Gamess.html" },
-  { path: "/play.html", file: "games.html" },
-  { path: "/settings", file: "settings.html" },
-  { path: "/chatarewecookedindabig25", file: "tabs.html" },
-  { path: "/home", file: "Index.html" },
-  { path: "/home-page", file: "index.html" },
-  { path: "/exthangr", file: "proxy.html" },
-  { path: "/contact", file: "contactsupport.html" },
-  { path: "/search", file: "search.html" },
-  { path: "/learnmathhere", file: "index.html" },
-  { path: "/animes", file: "cuh.html" },
-  { path: "/song", file: "web_music.html" },
-];
+const server = http.createServer(app);
 
-// biome-ignore lint/complexity/noForEach:
-routes.forEach((route) => {
-  app.get(route.path, (_req, res) => {
-    res.sendFile(path.join(__dirname, "mango", route.file));
-  });
-});
-
-app.use((req, res, next) => {
-  res.status(404).sendFile(path.join(__dirname, "mango", "404.html"));
-});
-
-app.use((err, req, res, next) => {
-  console.error(err.stack);
-  res.status(500).sendFile(path.join(__dirname, "mango", "404.html"));
+/*  
+   WISP ON /wisp/  
+   This makes all WebSocket upgrade requests to /wisp/* 
+   be handled by wisp-js.
+*/
+server.on("upgrade", (req, socket, head) => {
+  if (req.url.startsWith("/wisp/")) {
+    wisp.routeRequest(req, socket, head);
+  } else if (bareServer.shouldRoute(req)) {
+    bareServer.routeUpgrade(req, socket, head);
+  } else {
+    socket.end();
+  }
 });
 
 server.on("request", (req, res) => {
@@ -138,17 +105,7 @@ server.on("request", (req, res) => {
   }
 });
 
-server.on("upgrade", (req, socket, head) => {
-  if (bareServer.shouldRoute(req)) {
-    bareServer.routeUpgrade(req, socket, head);
-  } else {
-    socket.end();
-  }
+server.listen(PORT, () => {
+  console.log(chalk.greenBright(`Server running at http://localhost:${PORT}`));
+  console.log(chalk.magenta(`Wisp active at ws://localhost:${PORT}/wisp/`));
 });
-
-server.on("listening", () => {
-  console.log(chalk.whiteBright("✅ GU server ready at:"), chalk.cyan(`http://localhost:${PORT}`));
-});
-  console.log(chalk.white("✅ Server is fully operational and ready to accept connections!"));
-  console.log(chalk.red("Removed pnpm-lock.yaml because of some deploying issues"));
-server.listen({ port: PORT });
