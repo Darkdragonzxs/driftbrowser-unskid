@@ -12,7 +12,6 @@ Drift is a smooth, clean browser that helps you get around restrictions. It’s 
 - 💨 Fast and lightweight  
 - 🕶️ Private, no sign-in needed  
 - 🎨 Clean design with a dark theme  
-- 📱 Works on desktop and mobile
 
 ---
 
@@ -26,10 +25,9 @@ Drift is made for personal use. Don’t use it to break rules or policies — us
 
 - 👑 Owner: Veteraning  
 - 🔮 Co-Owner: ZXS
-- Dev: Astr0cat
 
 ---
 
 ### Credits
 
-Uses Ultraviolet for proxying!
+Uses Ultraviolet, scramjet, croxyproxy, rammerhead, sandstone, and other services for proxying!
